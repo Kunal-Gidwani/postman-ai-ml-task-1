@@ -1,0 +1,8 @@
+numpy
+scikit-learn
+matplotlib
+
+# torch is used ONLY inside the correctness harness (gradient_check.py /
+# test_correctness.py) as the trusted reference for deliverable 1.4.
+# The implementation in src/ never imports torch.
+torch
