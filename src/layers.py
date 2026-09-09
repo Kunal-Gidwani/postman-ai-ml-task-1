@@ -1,24 +1,13 @@
 """
-Layers for the manual-backpropagation network (deliverables 1.1, 1.2, 1.3).
-
-Every layer exposes the same two methods:
-
-    forward(x)  -> output, caching whatever the backward pass needs
-    backward(d) -> gradient with respect to this layer's input
-
-`d` is always dL/d(output of this layer), handed down from the layer above.
-Layers that own parameters also fill in their own `.grads` during backward.
-
-Shape convention: inputs are (N, d_in) with N the batch size, so a row is one
-example. Every gradient has exactly the same shape as the thing it
-differentiates, which is the cheapest sanity check available.
+Manual-backpropagation network 
+forward(x) / backward(d). d = dL/d(output). 
+rows = examples.
 """
 
 import numpy as np
 
 
 class Layer:
-    """Common interface. Parameterless layers inherit the empty params/grads."""
 
     def forward(self, x):
         raise NotImplementedError
@@ -28,64 +17,27 @@ class Layer:
 
     @property
     def params(self):
-        """List of (name, array) for every learnable tensor in this layer."""
         return []
 
     @property
     def grads(self):
-        """List of (name, array) gradients, aligned with `params`."""
         return []
 
 
 class Linear(Layer):
-    r"""
-    Fully connected layer: z = x W + b
+    """
+    z = xW + b
+    x: (N, d_in)   W: (d_in, d_out)   b: (d_out,)   z: (N, d_out)
 
-    Shapes
-        x : (N, d_in)
-        W : (d_in, d_out)
-        b : (d_out,)          broadcast across the batch
-        z : (N, d_out)
+    z[i,j] = sum_k x[i,k] * W[k,j] + b[j]
+    dW[k,j] = sum_i dz[i,j] * x[i,k]
+    dW = x.T @ dz
+    
+    db[j] = sum_i dz[i,j]   
+    db = dz.sum(axis=0)
 
-    Backward pass derivation
-    ------------------------
-    Write the forward pass elementwise, for example i and output unit j:
-
-        z[i, j] = sum_k x[i, k] * W[k, j] + b[j]
-
-    dL/dW[k, j]
-        W[k, j] only enters z[:, j], once per example, multiplied by x[:, k].
-        Chain rule and sum over the batch:
-
-            dL/dW[k, j] = sum_i dL/dz[i, j] * dz[i, j]/dW[k, j]
-                        = sum_i dz[i, j] * x[i, k]
-
-        That double loop over (k, j) with a sum over i is exactly the matrix
-        product x^T @ dz, so
-
-            dW = x^T @ dz                       (d_in, N) @ (N, d_out)
-
-    dL/db[j]
-        b[j] is added to z[i, j] for every example i, and dz[i, j]/db[j] = 1,
-        so the gradient accumulates over the batch:
-
-            db[j] = sum_i dz[i, j]              -> dz.sum(axis=0)
-
-        Forgetting this sum is the classic bug: b is shared by all N examples,
-        so all N contributions must be added, not averaged or taken once.
-
-    dL/dx[i, k]
-        x[i, k] feeds every output unit j of the same example, so we sum over j:
-
-            dL/dx[i, k] = sum_j dz[i, j] * W[k, j]
-
-        Summing over the second index of W is a product with W^T:
-
-            dx = dz @ W^T                       (N, d_out) @ (d_out, d_in)
-
-    Initialisation
-        He initialisation, W ~ N(0, 2 / d_in), which keeps activation variance
-        roughly constant through ReLU layers. Biases start at zero.
+    dx[i,k] = sum_j dz[i,j] * W[k,j]
+    dx = dz @ W.T
     """
 
     def __init__(self, d_in, d_out, rng=None):
@@ -101,11 +53,7 @@ class Linear(Layer):
         return x @ self.W + self.b
 
     def backward(self, d_out):
-        # d_out is dL/dz with shape (N, d_out).
-        # Written in place so that dW/db keep their identity: the optimiser and
-        # the gradient check both hold references to these arrays, and
-        # rebinding them here would leave those references pointing at stale
-        # gradients from the previous step.
+        # in-place so optimiser still points at the same dW/db
         self.dW[...] = self._x.T @ d_out
         self.db[...] = d_out.sum(axis=0)
         return d_out @ self.W.T
@@ -120,21 +68,9 @@ class Linear(Layer):
 
 
 class ReLU(Layer):
-    r"""
-    ReLU activation: a = max(0, z)
-
-    Derivative
-        da/dz = 1 for z > 0 and 0 for z < 0. At exactly z = 0 the function is
-        not differentiable; the standard convention (and what PyTorch does) is
-        to use 0, which is why the mask below is a strict `> 0`.
-
-        The upstream gradient is therefore just masked:
-
-            dz = da * 1[z > 0]                  elementwise, not a matmul
-
-    Caching z rather than a keeps the mask honest: after the forward pass a is
-    zero both where z was negative and where z happened to be exactly zero, so
-    reconstructing the mask from the output would be ambiguous.
+    """
+    a = max(0, z)
+    dz = da * (z > 0)     
     """
 
     def __init__(self):
@@ -150,23 +86,16 @@ class ReLU(Layer):
 
 class Sigmoid(Layer):
     r"""
-    Sigmoid activation: s = 1 / (1 + exp(-z))          [stretch goal]
-
+    Sigmoid activation: s = 1 / (1 + exp(-z)) 
     Derivative
-        ds/dz = s (1 - s). Quick derivation, writing s = (1 + e^-z)^-1:
+        ds/dz = s (1 - s). 
 
             ds/dz = -(1 + e^-z)^-2 * (-e^-z)
                   = e^-z / (1 + e^-z)^2
                   = [1 / (1 + e^-z)] * [e^-z / (1 + e^-z)]
                   = s * (1 - s)
-
         because e^-z / (1 + e^-z) = (1 + e^-z - 1) / (1 + e^-z) = 1 - s.
-
-        So the backward pass is dz = ds * s * (1 - s), elementwise.
-
-    The implementation is written piecewise to stay numerically stable: for
-    very negative z, exp(-z) overflows, so we use the algebraically identical
-    form exp(z) / (1 + exp(z)) on that branch.
+        dz = ds * s * (1 - s)
     """
 
     def __init__(self):
@@ -187,16 +116,13 @@ class Sigmoid(Layer):
 
 class Tanh(Layer):
     r"""
-    Tanh activation: a = tanh(z)                       [stretch goal]
-
+    a = tanh(z)                       
     Derivative
-        da/dz = 1 - tanh^2(z) = 1 - a^2. From the quotient rule on
+        da/dz = 1 - tanh^2(z) = 1 - a^2. 
         (e^z - e^-z) / (e^z + e^-z):
-
             da/dz = [(e^z + e^-z)^2 - (e^z - e^-z)^2] / (e^z + e^-z)^2
                   = 1 - tanh^2(z)
-
-        so the backward pass is dz = da * (1 - a^2), elementwise.
+        dz = da * (1 - a^2).
     """
 
     def __init__(self):
