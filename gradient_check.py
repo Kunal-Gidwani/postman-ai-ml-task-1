@@ -1,19 +1,7 @@
 """
-Gradient verification for deliverable 1.4.
-
-Two independent references, because they fail in different ways:
-
-1. Central-difference numerical gradients. Needs nothing but the forward pass,
-   so it cannot share a bug with the analytic backward pass. It is the check
-   that actually proves the hand-derived calculus.
-
-2. `torch.autograd`. Catches convention mistakes a numerical check cannot see,
-   such as reducing the loss with a sum where PyTorch uses a mean, because the
-   numerical check would happily confirm the gradient of whatever loss we
-   actually wrote.
-
-`torch` is imported in this file and in `test_correctness.py` only. Nothing in
-`src/` imports it, so the implementation stays autograd-free as required.
+gradient verification , two references:
+1. central-difference numerical gradients - only needs the forward pass, can't share a bug with backward
+2. torch.autograd - catches convention mistakes like sum vs mean that numerical check would miss
 """
 
 import numpy as np
@@ -23,23 +11,11 @@ from src.losses import MSELoss, SoftmaxCrossEntropy
 from src.network import MLP
 
 
-# ----------------------------------------------------------------------------
-# 1. Numerical gradients (central differences)
-# ----------------------------------------------------------------------------
+# numerical gradients
 
 def numerical_gradient(loss_fn, param, epsilon=1e-5):
-    r"""
-    Central-difference estimate of dL/dparam, elementwise.
-
-        dL/dp ~= (L(p + eps) - L(p - eps)) / (2 eps)
-
-    Central differences rather than forward differences because the error is
-    O(eps^2) instead of O(eps): the first-order terms of the two Taylor
-    expansions cancel. With float64 and eps = 1e-5 that lands around 1e-10
-    truncation error against ~1e-11 rounding noise, which is the sweet spot.
-
-    `param` is modified in place and restored, so `loss_fn` must read the live
-    array (which it does: it re-runs the forward pass on the same model).
+    """
+    (L(p+eps) - L(p-eps)) / (2*eps) for each element.
     """
     grad = np.zeros_like(param)
     iterator = np.nditer(param, flags=["multi_index"], op_flags=["readwrite"])
@@ -54,7 +30,7 @@ def numerical_gradient(loss_fn, param, epsilon=1e-5):
         param[index] = original - epsilon
         loss_minus = loss_fn()
 
-        param[index] = original  # restore before moving on
+        param[index] = original
         grad[index] = (loss_plus - loss_minus) / (2.0 * epsilon)
 
         iterator.iternext()
@@ -63,27 +39,10 @@ def numerical_gradient(loss_fn, param, epsilon=1e-5):
 
 
 def error_metrics(a, b):
-    r"""
-    Return (relative_error, absolute_error) between two gradient arrays.
-
-        relative_error = max |a - b| / max(|a| + |b|, tiny)
-        absolute_error = max |a - b|
-
-    Both are needed, because each is blind to a case the other catches.
-
-    A plain absolute difference is meaningless without knowing the gradient
-    magnitude, so the relative error is the primary metric: it is comparable
-    across layers whose gradients differ by orders of magnitude.
-
-    But the relative error becomes misleadingly harsh under catastrophic
-    cancellation. The tanh backward pass is the concrete example here. For
-    z = -8.13, tanh(z) = -0.999999827..., so evaluating 1 - tanh^2(z) subtracts
-    two nearly equal numbers and throws away about seven significant digits.
-    NumPy's tanh and PyTorch's tanh disagree in the last bit (~1e-16), and that
-    cancellation amplifies the disagreement to ~3e-10 in relative terms even
-    though the absolute difference is 2e-16, i.e. machine epsilon. Reporting
-    both metrics lets a caller accept that case on the absolute error while
-    still holding everything else to a tight relative bound.
+    """
+    relative = max|a-b| / max(|a|+|b|, tiny)
+    absolute = max|a-b|
+    need both: relative breaks under catastrophic cancellation (tanh near +-1),
     """
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
@@ -93,17 +52,12 @@ def error_metrics(a, b):
 
 
 def check_model_gradients(model, x, targets, epsilon=1e-5):
-    """
-    Compare every analytic parameter gradient against central differences.
-
-    Returns a list of (label, relative_error, absolute_error) in the model's
-    parameter order.
-    """
+    # compare every analytic gradient against numerical
+    # returns list of (label, relative_error, absolute_error)
     model.compute_loss(x, targets)
     model.backward()
 
-    # Snapshot the analytic gradients: the numerical pass perturbs parameters
-    # and re-runs forward, which would otherwise overwrite them.
+    # snapshot analytic grads before numerical pass overwrites them
     analytic = [(label, grad.copy()) for label, _, grad in model.parameters()]
 
     results = []
@@ -117,17 +71,10 @@ def check_model_gradients(model, x, targets, epsilon=1e-5):
     return results
 
 
-# ----------------------------------------------------------------------------
-# 2. torch.autograd reference
-# ----------------------------------------------------------------------------
+# torch.autograd reference
 
 def torch_reference_gradients(model, x, targets):
-    """
-    Rebuild the exact same 64 -> hidden -> 10 classifier in torch, using our
-    weights, and let autograd differentiate it.
-
-    Returns {label: gradient array} keyed the same way as `model.parameters()`.
-    """
+    # rebuild same model in torch with our weights, let autograd diff it
     import torch
 
     linear1, _relu, linear2 = model.layers
@@ -135,9 +82,7 @@ def torch_reference_gradients(model, x, targets):
     x_t = torch.tensor(np.asarray(x, dtype=float), dtype=torch.float64)
     y_t = torch.tensor(np.asarray(targets), dtype=torch.long)
 
-    # torch.nn.Linear stores weight as (out_features, in_features), the
-    # transpose of our (d_in, d_out) convention, hence the .T on the way in and
-    # again on the way out.
+    # torch stores weight as (out, in), we use (in, out), hence the .T
     W1 = torch.tensor(linear1.W.T, dtype=torch.float64, requires_grad=True)
     b1 = torch.tensor(linear1.b, dtype=torch.float64, requires_grad=True)
     W2 = torch.tensor(linear2.W.T, dtype=torch.float64, requires_grad=True)
@@ -146,8 +91,6 @@ def torch_reference_gradients(model, x, targets):
     hidden = torch.relu(torch.nn.functional.linear(x_t, W1, b1))
     logits = torch.nn.functional.linear(hidden, W2, b2)
 
-    # CrossEntropyLoss == log_softmax + NLL with a mean reduction, which is
-    # exactly what SoftmaxCrossEntropy computes.
     loss = torch.nn.functional.cross_entropy(logits, y_t, reduction="mean")
     loss.backward()
 
@@ -161,9 +104,7 @@ def torch_reference_gradients(model, x, targets):
 
 
 def check_against_torch(model, x, targets):
-    """
-    Returns (loss_abs_diff, [(label, relative_error, absolute_error), ...]).
-    """
+    # returns (loss_abs_diff, [(label, relative, absolute), ...])
     our_loss, _ = model.compute_loss(x, targets)
     model.backward()
 
@@ -176,25 +117,15 @@ def check_against_torch(model, x, targets):
     return abs(our_loss - reference["loss"]), errors
 
 
-# ----------------------------------------------------------------------------
-# 3. Per-layer checks for the individual activation derivatives
-# ----------------------------------------------------------------------------
+# per-activation checks
 
 def check_activation_against_torch(activation_name, z):
-    """
-    Verify one activation's backward pass in isolation.
-
-    Uses an arbitrary non-uniform upstream gradient rather than ones, so that a
-    backward pass which ignores `d_out` (or transposes it) cannot pass by luck.
-    """
+    # check one activation's backward in isolation
+    # uses random d_out so a wrong backward can't pass by luck
     import torch
 
     activations = {"relu": ReLU, "sigmoid": Sigmoid, "tanh": Tanh}
-    torch_fns = {
-        "relu": torch.relu,
-        "sigmoid": torch.sigmoid,
-        "tanh": torch.tanh,
-    }
+    torch_fns = {"relu": torch.relu, "sigmoid": torch.sigmoid, "tanh": torch.tanh}
 
     layer = activations[activation_name]()
     rng = np.random.default_rng(0)
@@ -211,13 +142,8 @@ def check_activation_against_torch(activation_name, z):
 
 
 def check_mse_sigmoid_against_torch(z, y):
-    """
-    Verify the stretch-goal pair (Sigmoid + MSE) end to end.
-
-    Sigmoid + MSE does not cancel the way softmax + cross-entropy does, so this
-    exercises a genuinely different gradient path: dL/dz keeps an explicit
-    yhat(1 - yhat) factor.
-    """
+    # stretch goal: sigmoid + mse end to end
+    # doesn't cancel like softmax+ce, so dL/dz keeps the yhat(1-yhat) factor
     import torch
 
     sigmoid = Sigmoid()
@@ -236,17 +162,10 @@ def check_mse_sigmoid_against_torch(z, y):
     return abs(our_loss - loss_t.item()), relative, absolute
 
 
-# ----------------------------------------------------------------------------
-# Small helper so the harness and the CLI build the same fixture
-# ----------------------------------------------------------------------------
+# shared test fixture
 
 def build_test_fixture(n=8, d_in=64, d_hidden=32, d_out=10, seed=0):
-    """
-    A tiny deterministic model and batch for the checks.
-
-    Deliberately small: the numerical check costs two forward passes per
-    parameter, so a 64x32 layer already means ~4k forward passes.
-    """
+    # small on purpose: numerical check costs 2 forward passes per parameter
     rng = np.random.default_rng(seed)
     model = MLP.build_classifier(d_in, d_hidden, d_out, SoftmaxCrossEntropy(), rng=rng)
     x = rng.normal(size=(n, d_in))
