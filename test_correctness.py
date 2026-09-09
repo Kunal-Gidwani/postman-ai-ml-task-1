@@ -1,25 +1,14 @@
 """
-Correctness harness - Postman AI/ML Recruitment Task (26 Batch), Task 1.
-
-Verifies the hand-derived gradients in `src/` against two independent trusted
-references and reports PASS or FAIL per check, exiting non-zero on any failure.
-
-    python test_correctness.py
-
-Checks
-    1. Every parameter gradient vs central-difference numerical gradients.
-    2. Every parameter gradient and the loss value vs torch.autograd.
-    3. Each activation's backward pass (ReLU, Sigmoid, Tanh) vs torch.
-    4. The stretch pair Sigmoid + MSE vs torch.
-    5. Shape invariant: every gradient matches the shape of its parameter.
-    6. Sanity: the loss actually decreases over a short training run.
-
-The torch checks are skipped (not failed) if torch is not installed, so the
-numerical checks still provide a verdict on their own.
+runs 19 checks on the hand-derived gradients, prints PASS/FAIL, exits non-zero on failure.
+    1. analytic gradients vs numerical (central difference)
+    2. analytic gradients + loss vs torch.autograd
+    3. relu/sigmoid/tanh backward vs torch
+    4. sigmoid + mse vs torch
+    5. gradient shapes match parameter shapes
+    6. loss actually goes down after 50 sgd steps
 """
 
 import sys
-
 import numpy as np
 
 from gradient_check import (
@@ -30,26 +19,9 @@ from gradient_check import (
     check_mse_sigmoid_against_torch,
 )
 
-# Tolerances.
-#
-# Every gradient comparison passes if EITHER the relative error is below the
-# relative tolerance OR the absolute error is below the absolute tolerance,
-# which is the same combined rule `numpy.allclose` uses. Both are needed:
-# relative error alone becomes misleadingly harsh under catastrophic
-# cancellation (see `error_metrics` in gradient_check.py for the tanh case,
-# where a last-bit disagreement of 2e-16 shows up as 3e-10 relative), while
-# absolute error alone would wave through a badly wrong but small gradient.
-#
-# The numerical check is deliberately the looser of the two. Central
-# differences carry O(eps^2) truncation error, and a ReLU network adds a second
-# source of slack: if some pre-activation sits very close to zero, the +/- eps
-# perturbation can flip the ReLU mask, so the two-sided difference straddles a
-# kink and estimates the gradient of neither side. Observed errors here are
-# ~9e-7. None of this weakens the check, because a genuine sign or transpose
-# error produces a relative error near 1.0, not near the tolerance.
-#
-# The torch comparison is exact analytic differentiation in float64 on both
-# sides, so it should agree to near machine precision; observed max is ~4e-14.
+# pass if EITHER relative OR absolute is within tolerance (same rule as numpy.allclose)
+# numerical is looser: relu kink near zero can flip the mask and inflate the error (~9e-7 observed)
+# torch is tighter: both sides are float64 analytic, should agree near machine precision (~4e-14)
 NUMERICAL_RELATIVE_TOLERANCE = 1e-5
 NUMERICAL_ABSOLUTE_TOLERANCE = 1e-9
 TORCH_RELATIVE_TOLERANCE = 1e-10
@@ -63,7 +35,7 @@ results = []
 
 
 def check(name, condition, detail=""):
-    """Record and print one check."""
+    """print PASS/FAIL and record result"""
     status = PASS if condition else FAIL
     message = f"[{status}] {name}"
     if detail:
@@ -73,17 +45,12 @@ def check(name, condition, detail=""):
 
 
 def skip(name, reason):
-    """Note a check that could not run. Does not affect the exit code."""
+    # printed but doesn't count toward pass/fail
     print(f"[{SKIP}] {name}  ->  {reason}")
 
 
 def check_gradient(name, relative, absolute, rtol, atol):
-    """
-    Record a gradient comparison using the combined relative/absolute rule.
-
-    Passes when either metric is within tolerance, and always prints both so
-    the reason for a pass is visible rather than hidden behind a boolean.
-    """
+    # passes if either relative or absolute is within tolerance
     passed = relative < rtol or absolute < atol
     check(name, passed, f"relative {relative:.3e}, absolute {absolute:.3e}")
 
@@ -102,9 +69,7 @@ def section(title):
     print("-" * len(title))
 
 
-# ----------------------------------------------------------------------------
-# 1. Numerical gradient check
-# ----------------------------------------------------------------------------
+# Numerical gradient check
 
 def test_numerical_gradients():
     section("1. Analytic gradients vs central-difference numerical gradients")
@@ -120,9 +85,7 @@ def test_numerical_gradients():
         )
 
 
-# ----------------------------------------------------------------------------
-# 2. torch.autograd comparison
-# ----------------------------------------------------------------------------
+# torch.autograd comparison
 
 def test_against_torch():
     section("2. Analytic gradients vs torch.autograd")
@@ -149,9 +112,7 @@ def test_against_torch():
         )
 
 
-# ----------------------------------------------------------------------------
-# 3. Activation derivatives in isolation
-# ----------------------------------------------------------------------------
+# Activation derivatives in isolation
 
 def test_activations():
     section("3. Activation backward passes vs torch")
@@ -161,8 +122,7 @@ def test_activations():
         return
 
     rng = np.random.default_rng(1)
-    # Spread across zero so the ReLU mask is genuinely exercised, and include
-    # large magnitudes to catch the sigmoid overflow branch.
+    # include +-40 to hit the sigmoid overflow branch
     z = np.concatenate(
         [rng.normal(size=(6, 5)) * 3.0, np.array([[-40.0, -1.0, 0.0, 1.0, 40.0]])]
     )
@@ -178,9 +138,7 @@ def test_activations():
         )
 
 
-# ----------------------------------------------------------------------------
-# 4. Stretch-goal pair
-# ----------------------------------------------------------------------------
+# Stretch-goal pair
 
 def test_stretch_pair():
     section("4. Stretch pair (Sigmoid + MSE) vs torch")
@@ -208,9 +166,7 @@ def test_stretch_pair():
     )
 
 
-# ----------------------------------------------------------------------------
-# 5. Shape invariant
-# ----------------------------------------------------------------------------
+# Shape invariant
 
 def test_gradient_shapes():
     section("5. Shape invariant: every gradient matches its parameter")
@@ -227,10 +183,7 @@ def test_gradient_shapes():
         )
 
 
-# ----------------------------------------------------------------------------
-# 6. The loss actually decreases
-# ----------------------------------------------------------------------------
-
+# The loss actually decreases
 def test_loss_decreases():
     section("6. Training sanity: loss decreases on a fixed batch")
 
@@ -275,7 +228,6 @@ def main():
     print("=" * 68)
 
     sys.exit(0 if all_passed else 1)
-
 
 if __name__ == "__main__":
     main()
