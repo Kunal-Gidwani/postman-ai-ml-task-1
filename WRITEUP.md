@@ -28,16 +28,16 @@ and the loss rather than on algebra I would only be copying. Softmax with
 cross-entropy is the natural output pairing for mutually exclusive classes, and
 their combined gradient is clean for a reason worth understanding (section 2.4).
 
-| Deliverable | Where |
-|---|---|
-| 1.1 network from matrix operations | [`src/network.py`](src/network.py), [`src/layers.py`](src/layers.py) |
-| 1.2 forward pass, linear + activation | `Linear`, `ReLU` in [`src/layers.py`](src/layers.py) |
-| 1.3 manual backward pass + derivations | `backward()` in every layer; section 2 below |
-| 1.4 gradient check | [`gradient_check.py`](gradient_check.py), [`test_correctness.py`](test_correctness.py); section 3 |
-| 1.5 training, loss decreases | [`train.py`](train.py); section 4 |
-| 1.6 mistakes and how I found them | section 5 |
-| Stretch: second activation–loss pair | Tanh + Sigmoid/MSE; section 2.5, section 4.2 |
-| Stretch: optimizer | Momentum and Adam in [`src/optimizers.py`](src/optimizers.py) |
+| Deliverable                            | Where                                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 1.1 network from matrix operations     | [`src/network.py`](src/network.py), [`src/layers.py`](src/layers.py)                              |
+| 1.2 forward pass, linear + activation  | `Linear`, `ReLU` in [`src/layers.py`](src/layers.py)                                              |
+| 1.3 manual backward pass + derivations | `backward()` in every layer; section 2 below                                                      |
+| 1.4 gradient check                     | [`gradient_check.py`](gradient_check.py), [`test_correctness.py`](test_correctness.py); section 3 |
+| 1.5 training, loss decreases           | [`train.py`](train.py); section 4                                                                 |
+| 1.6 mistakes and how I found them      | section 5                                                                                         |
+| Stretch: second activation–loss pair   | Tanh + Sigmoid/MSE; section 2.5, section 4.2                                                      |
+| Stretch: optimizer                     | Momentum and Adam in [`src/optimizers.py`](src/optimizers.py)                                     |
 
 ---
 
@@ -206,12 +206,12 @@ Two independent references, because each catches what the other cannot:
 
 Worst observed error per parameter:
 
-| Gradient | vs numerical (relative) | vs torch (relative) |
-|---|---|---|
-| `layer0.W` | 8.918e-07 | 4.122e-14 |
-| `layer0.b` | 9.229e-08 | 9.052e-15 |
-| `layer2.W` | 1.513e-08 | 2.630e-15 |
-| `layer2.b` | 2.173e-10 | 1.215e-16 |
+| Gradient   | vs numerical (relative) | vs torch (relative) |
+| ---------- | ----------------------- | ------------------- |
+| `layer0.W` | 8.918e-07               | 4.122e-14           |
+| `layer0.b` | 9.229e-08               | 9.052e-15           |
+| `layer2.W` | 1.513e-08               | 2.630e-15           |
+| `layer2.b` | 2.173e-10               | 1.215e-16           |
 
 The loss itself matches `torch.nn.functional.cross_entropy` to 4.441e-16.
 
@@ -241,13 +241,13 @@ straddles a kink and estimates the gradient of neither side.
 A passing gradient check means nothing unless it would fail on a real bug, so
 `python test_harness_sensitivity.py` breaks each backward pass in turn:
 
-| Sabotage | Worst relative error | Detected |
-|---|---|---|
-| `db = d_out[0]` instead of a batch sum | 1.000 | yes |
-| `dx` missing the transpose on `W` | — | yes, shape error |
-| ReLU mask inverted | 1.000 | yes |
-| Softmax CE missing the `1/N` | 0.778 | yes |
-| Softmax CE sign flipped | 1.000 | yes |
+| Sabotage                               | Worst relative error | Detected         |
+| -------------------------------------- | -------------------- | ---------------- |
+| `db = d_out[0]` instead of a batch sum | 1.000                | yes              |
+| `dx` missing the transpose on `W`      | —                    | yes, shape error |
+| ReLU mask inverted                     | 1.000                | yes              |
+| Softmax CE missing the `1/N`           | 0.778                | yes              |
+| Softmax CE sign flipped                | 1.000                | yes              |
 
 Against a correct baseline of 8.918e-07, that is six orders of magnitude of
 headroom. The tolerances are justified by measurement rather than assumed.
@@ -262,10 +262,10 @@ headroom. The tolerances are justified by measurement rather than assumed.
 batch size 32. Both optimisers start from identical weights (same seed), so the
 difference between the curves isolates the update rule.
 
-| Optimiser | Train loss (first → last) | Final test accuracy |
-|---|---|---|
-| SGD, lr 0.5 | 1.1099 → 0.0089 | 0.9582 |
-| Adam, lr 0.01 | 1.1861 → 0.0032 | 0.9749 |
+| Optimiser     | Train loss (first → last) | Final test accuracy |
+| ------------- | ------------------------- | ------------------- |
+| SGD, lr 0.5   | 1.1099 → 0.0089           | 0.9582              |
+| Adam, lr 0.01 | 1.1861 → 0.0032           | 0.9749              |
 
 ![Loss curves](plots/loss_curve.png)
 
@@ -364,58 +364,3 @@ a silent `NaN` rather than a wrong number:
   algebraically identical `e^z/(1 + e^z)` for `z < 0`. A single expression
   overflows for large negative `z`. The harness feeds ±40 through the
   activations specifically to exercise this.
-
----
-
-## 6. Discussion
-
-The single most useful idea in this task is that the gradient of a composite
-function is a product of local factors, and that **the size of those factors
-determines whether learning happens at all**.
-
-Softmax + cross-entropy makes this concrete in both directions. Fused, the
-`1/p_c` and `p_c` cancel and the correct-class gradient is `≈ -1/N` regardless
-of how wrong the network currently is. Sigmoid + MSE has no such cancellation,
-so `dL/dz` retains `ŷ(1 - ŷ)`, which vanishes on confidently-wrong predictions
-— the network is most wrong exactly where it learns slowest. Same chain rule,
-opposite behaviour, and it shows up as the epoch count in section 4.2.
-
-The second thing that transferred: shapes are a proof obligation, not
-bookkeeping. Every gradient must match its parameter's shape, and for `dW` and
-`dx` there is only one arrangement of the available matrices that produces the
-right one. Working backwards from the required shape reconstructs `xᵀ dz` and
-`dz Wᵀ` without redoing the elementwise derivation. It does not catch
-everything — `db` and the `1/N` both slip through — which is what the numerical
-check is for.
-
----
-
-## 7. What I would do next
-
-- Add a `BatchNorm` layer and derive its backward pass, where the gradient also
-  has to flow through the batch mean and variance rather than treating them as
-  constants.
-- Vectorise the numerical gradient check. It currently costs two forward passes
-  per parameter, so it only runs on a deliberately tiny fixture.
-- Address the mild overfitting in section 4.1 with weight decay or early stopping, and
-  confirm the gradient of the added penalty term against the same harness.
-- Test the ReLU kink directly, constructing a pre-activation at exactly zero to
-  confirm the `> 0` convention matches PyTorch instead of relying on random
-  data to avoid the case.
-
----
-
-## References
-
-- Rumelhart, Hinton & Williams (1986), *Learning representations by
-  back-propagating errors*, Nature 323, 533–536 — the original backpropagation
-  paper.
-- Michael Nielsen, *Neural Networks and Deep Learning*, Chapter 2 — backprop in
-  the matrix notation used here.
-- 3Blue1Brown, *Neural Networks*, chapters 1–4 — the visual intuition for the
-  chain rule through layers.
-- Karpathy, *Neural Networks: Zero to Hero* — building backprop from nothing.
-- CS231n course notes — gradient checking practice, including the relative
-  error convention and the ReLU kink caveat.
-- PyTorch docs for `torch.autograd`, `nn.functional.cross_entropy` and
-  `nn.MSELoss` — the reduction conventions the harness matches against.
