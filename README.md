@@ -10,7 +10,7 @@ Built a small feedforward net using only NumPy. Every gradient is derived and co
 Linear(64 -> 32) -> ReLU -> Linear(32 -> 10) -> Softmax + Cross-Entropy
 ```
 
-Dataset: scikit-learn `load_digits` (1797 handwritten digits, 8x8, 10 classes). No download needed.
+Dataset: scikit-learn `load_digits` (1797 handwritten digits, 8x8, 10 classes). No download needed, nothing committed to the repo.
 
 ## Setup
 
@@ -23,35 +23,52 @@ pip install -r requirements.txt
 ## How to run
 
 **Check gradients (deliverable 1.4)**
+
 ```bash
 python test_correctness.py
 ```
-Runs PASS/FAIL checks against numerical gradients and torch.autograd. Exits non-zero on failure. Torch checks skip if torch isn't installed.
+
+Runs 19 checks, prints PASS/FAIL, exits non-zero on failure. Checks analytic vs numerical gradients, vs torch.autograd, each activation separately, and a sanity check that loss goes down.
 
 ```bash
-python gradient_check.py              # raw error numbers
-python test_harness_sensitivity.py    # proves the harness catches real bugs
+python gradient_check.py   # just the raw error numbers
 ```
 
+**Check the harness isn't useless**
+
+```bash
+python test_harness_sensitivity.py
+```
+
+Breaks each backward pass on purpose and confirms every bug gets caught.
+
 **Train (deliverable 1.5)**
+
 ```bash
 python train.py           # both experiments
 python train.py --main    # digits classifier only
 python train.py --stretch # odd/even stretch goal only
 ```
+
 Prints loss and accuracy per epoch, saves plots to `plots/`.
 
 ## Results
 
-All gradient checks pass. Worst relative errors:
-- numerical: ~8.9e-07
-- torch.autograd: ~4.1e-14
+All 19 checks pass.
 
-Training (40 epochs, same starting weights):
-- SGD lr=0.5 → train loss 1.11 → 0.009, test accuracy ~95.8%
-- Adam lr=0.01 → train loss 1.19 → 0.003, test accuracy ~97.5%
+| Reference           | Worst relative error |
+| ------------------- | -------------------- |
+| Numerical gradients | 8.918e-07            |
+| torch.autograd      | 4.122e-14            |
 
-Stretch (Tanh + Sigmoid/MSE, odd vs even): loss 0.15 → 0.008, accuracy ~99.4%.
+40 epochs, both optimisers from the same starting weights:
+
+| Optimiser    | Train loss      | Test accuracy |
+| ------------ | --------------- | ------------- |
+| SGD lr=0.5   | 1.1099 → 0.0089 | 95.8%         |
+| Adam lr=0.01 | 1.1861 → 0.0032 | 97.5%         |
+
+Stretch (Tanh + Sigmoid/MSE, odd vs even): loss 0.1482 → 0.0078, accuracy 99.4%.
 
 ![Loss curves](plots/loss_curve.png)
 
@@ -59,31 +76,31 @@ Stretch (Tanh + Sigmoid/MSE, odd vs even): loss 0.15 → 0.008, accuracy ~99.4%.
 
 ```
 src/
-  layers.py       # Linear, ReLU, Sigmoid, Tanh + backward
+  layers.py       # Linear, ReLU, Sigmoid, Tanh + their backward passes
   losses.py       # SoftmaxCrossEntropy, MSELoss
-  network.py      # MLP container
+  network.py      # MLP: forward in order, backward in reverse
   optimizers.py   # SGD, Momentum, Adam
   data.py         # load_digits, scale, split, minibatches
-train.py
-gradient_check.py
-test_correctness.py
-test_harness_sensitivity.py
-plots/
-WRITEUP.md
+train.py                    # runs training, saves plots
+gradient_check.py           # numerical + torch gradient comparison
+test_correctness.py         # PASS/FAIL harness
+test_harness_sensitivity.py # proves harness catches real bugs
+plots/                      # loss curves
+WRITEUP.md                  # gradient derivations, results, mistakes
 requirements.txt
 ```
 
 ## Deliverables
 
-| # | What | Where |
-|---|---|---|
-| 1.1 | Feedforward net | `src/network.py`, `src/layers.py` |
-| 1.2 | Forward pass | `Linear`, `ReLU` in `src/layers.py` |
-| 1.3 | Manual backward + derivations | each `backward()`; WRITEUP section 2 |
-| 1.4 | Gradient check | `test_correctness.py`; WRITEUP section 3 |
-| 1.5 | Train, loss decreases | `train.py`; WRITEUP section 4 |
-| 1.6 | Gradient mistakes | WRITEUP section 5 |
-| Stretch | Tanh + Sigmoid/MSE | `src/layers.py`, `src/losses.py` |
-| Stretch | Momentum / Adam | `src/optimizers.py` |
+| #       | What                            | Where                                          |
+| ------- | ------------------------------- | ---------------------------------------------- |
+| 1.1     | Feedforward net from matrix ops | `src/network.py`, `src/layers.py`              |
+| 1.2     | Forward pass                    | `Linear`, `ReLU` in `src/layers.py`            |
+| 1.3     | Manual backward + derivations   | `backward()` in each layer; WRITEUP §2         |
+| 1.4     | Gradient check                  | `test_correctness.py`; WRITEUP §3              |
+| 1.5     | Train, loss decreases           | `train.py`; WRITEUP §4                         |
+| 1.6     | Gradient mistakes               | WRITEUP §5                                     |
+| Stretch | Tanh + Sigmoid/MSE              | `src/layers.py`, `src/losses.py`; WRITEUP §2.5 |
+| Stretch | Momentum / Adam                 | `src/optimizers.py`                            |
 
-Full write-up: [WRITEUP.md](WRITEUP.md)
+Full write-up with derivations and mistakes: [WRITEUP.md](WRITEUP.md)
