@@ -39,11 +39,11 @@ python train.py           # both experiments
 python train.py --main    # digits classifier only
 python train.py --stretch # odd/even stretch goal only
 ```
-Prints loss and accuracy per epoch. Writes plots to `plots/` when matplotlib is installed.
+Prints loss and accuracy per epoch, saves plots to `plots/`.
 
-## Results so far
+## Results
 
-Gradient checks pass. Worst relative errors:
+All gradient checks pass. Worst relative errors:
 - numerical: ~8.9e-07
 - torch.autograd: ~4.1e-14
 
@@ -53,7 +53,7 @@ Training (40 epochs, same starting weights):
 
 Stretch (Tanh + Sigmoid/MSE, odd vs even): loss 0.15 → 0.008, accuracy ~99.4%.
 
-Loss curve images and the full write-up are still being added.
+![Loss curves](plots/loss_curve.png)
 
 ## Files
 
@@ -68,7 +68,22 @@ train.py
 gradient_check.py
 test_correctness.py
 test_harness_sensitivity.py
+plots/
+WRITEUP.md
 requirements.txt
 ```
 
-Still to add: `plots/`, `WRITEUP.md`
+## Deliverables
+
+| # | What | Where |
+|---|---|---|
+| 1.1 | Feedforward net | `src/network.py`, `src/layers.py` |
+| 1.2 | Forward pass | `Linear`, `ReLU` in `src/layers.py` |
+| 1.3 | Manual backward + derivations | each `backward()`; WRITEUP section 2 |
+| 1.4 | Gradient check | `test_correctness.py`; WRITEUP section 3 |
+| 1.5 | Train, loss decreases | `train.py`; WRITEUP section 4 |
+| 1.6 | Gradient mistakes | WRITEUP section 5 |
+| Stretch | Tanh + Sigmoid/MSE | `src/layers.py`, `src/losses.py` |
+| Stretch | Momentum / Adam | `src/optimizers.py` |
+
+Full write-up: [WRITEUP.md](WRITEUP.md)
