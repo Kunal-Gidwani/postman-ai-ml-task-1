@@ -1,15 +1,12 @@
 # Using scikit-learn dataset
-
 import numpy as np
 from sklearn.datasets import load_digits
-
 
 def load_digits_split(test_fraction=0.2, seed=0):
     # pixels are 0-16, divide so inputs are 0-1
     dataset = load_digits()
     x = dataset.data.astype(np.float64) / 16.0
     y = dataset.target.astype(np.int64)
-
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(x))
     x, y = x[order], y[order]
@@ -27,7 +24,6 @@ def make_binary_parity_split(test_fraction=0.2, seed=0):
         x_test,
         (y_test % 2).astype(np.float64).reshape(-1, 1),
     )
-
 
 def iterate_minibatches(x, y, batch_size, rng):
     # shuffle each epoch so the net doesn't memorize the order
