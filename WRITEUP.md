@@ -28,17 +28,6 @@ and the loss rather than on algebra I would only be copying. Softmax with
 cross-entropy is the natural output pairing for mutually exclusive classes, and
 their combined gradient is clean for a reason worth understanding (section 2.4).
 
-| Deliverable                            | Where                                                                                             |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| 1.1 network from matrix operations     | [`src/network.py`](src/network.py), [`src/layers.py`](src/layers.py)                              |
-| 1.2 forward pass, linear + activation  | `Linear`, `ReLU` in [`src/layers.py`](src/layers.py)                                              |
-| 1.3 manual backward pass + derivations | `backward()` in every layer; section 2 below                                                      |
-| 1.4 gradient check                     | [`gradient_check.py`](gradient_check.py), [`test_correctness.py`](test_correctness.py); section 3 |
-| 1.5 training, loss decreases           | [`train.py`](train.py); section 4                                                                 |
-| 1.6 mistakes and how I found them      | section 5                                                                                         |
-| Stretch: second activation–loss pair   | Tanh + Sigmoid/MSE; section 2.5, section 4.2                                                      |
-| Stretch: optimizer                     | Momentum and Adam in [`src/optimizers.py`](src/optimizers.py)                                     |
-
 ---
 
 ## 2. The gradients, derived
@@ -183,7 +172,7 @@ dL/dz = [2(ŷ - y)/(N·D)] · ŷ(1 - ŷ)
 and that `ŷ(1 - ŷ)` factor survives. It goes to zero exactly when the network
 is confidently wrong, which is the saturation weakness of sigmoid + MSE and the
 mirror image of the cancellation in section 2.4. It is visible in the experiment: the
-pair trains fine, just needing more epochs (section 4.2).
+pair trains fine, just needing more epochs
 
 ---
 
@@ -215,92 +204,13 @@ Worst observed error per parameter:
 
 The loss itself matches `torch.nn.functional.cross_entropy` to 4.441e-16.
 
-### Why the tolerances are what they are
-
-Comparisons pass on **either** relative or absolute tolerance, the same
-combined rule `numpy.allclose` uses. Both metrics are necessary.
-
-Relative error alone becomes misleadingly harsh under catastrophic
-cancellation, and the tanh check is a concrete instance. At `z = -8.13`,
-`tanh(z) = -0.999999827…`, so evaluating `1 - tanh²(z)` subtracts two nearly
-equal numbers and discards about seven significant digits. NumPy's `tanh` and
-PyTorch's `tanh` disagree in the **last bit** (1.1e-16), and the cancellation
-amplifies that into a 3.221e-10 relative error — while the absolute difference
-is 2.006e-16, i.e. machine epsilon. Nothing is wrong with the derivation; the
-metric is simply the wrong lens for that value. Absolute error alone would have
-the opposite failure, waving through a badly wrong but small gradient.
-
-The numerical tolerance (1e-5 relative) is looser than the torch one (1e-10)
-for two reasons: central differences carry `O(ε²)` truncation error, and a ReLU
-network adds a second source of slack — if a pre-activation sits very close to
-zero, the ±ε perturbation can flip the mask, so the two-sided difference
-straddles a kink and estimates the gradient of neither side.
-
-### Proving the check is not vacuous
-
-A passing gradient check means nothing unless it would fail on a real bug, so
-`python test_harness_sensitivity.py` breaks each backward pass in turn:
-
-| Sabotage                               | Worst relative error | Detected         |
-| -------------------------------------- | -------------------- | ---------------- |
-| `db = d_out[0]` instead of a batch sum | 1.000                | yes              |
-| `dx` missing the transpose on `W`      | —                    | yes, shape error |
-| ReLU mask inverted                     | 1.000                | yes              |
-| Softmax CE missing the `1/N`           | 0.778                | yes              |
-| Softmax CE sign flipped                | 1.000                | yes              |
-
-Against a correct baseline of 8.918e-07, that is six orders of magnitude of
-headroom. The tolerances are justified by measurement rather than assumed.
+A passing check only matters if it would fail on a real bug — see [`test_harness_sensitivity.py`](test_harness_sensitivity.py).
 
 ---
 
-## 4. Experiments
+##  4. Mistakes and how I found them (deliverable 1.6)
 
-### 4.1 Digits classification (deliverable 1.5)
-
-`Linear(64,32) → ReLU → Linear(32,10) → Softmax + Cross-Entropy`, 40 epochs,
-batch size 32. Both optimisers start from identical weights (same seed), so the
-difference between the curves isolates the update rule.
-
-| Optimiser     | Train loss (first → last) | Final test accuracy |
-| ------------- | ------------------------- | ------------------- |
-| SGD, lr 0.5   | 1.1099 → 0.0089           | 0.9582              |
-| Adam, lr 0.01 | 1.1861 → 0.0032           | 0.9749              |
-
-![Loss curves](plots/loss_curve.png)
-
-The loss decreases monotonically in the aggregate for both. Adam reaches a
-lower training loss and gets there faster in the first few epochs, which is
-what the per-parameter step scaling is for.
-
-Test loss flattens around epoch 10 and drifts up slightly while training loss
-keeps falling — mild overfitting, expected for a 2,410-parameter model on 1,438
-training examples. Test accuracy holds around 96–98%, so it is not harmful
-here, and since correctness rather than accuracy is the point of this task I
-left it rather than adding regularisation.
-
-### 4.2 Stretch: Tanh + Sigmoid/MSE
-
-`Linear(64,16) → Tanh → Linear(16,1) → Sigmoid + MSE`, on the same images
-relabelled odd vs even. MSE loss 0.1482 → 0.0078, final test accuracy 0.9944.
-
-![Stretch loss curve](plots/stretch_loss_curve.png)
-
-A deliberate note on the framing: I did **not** simply swap sigmoid + MSE onto
-the 10-class problem. Softmax outputs compete because a digit is exactly one
-class; sigmoid produces one independent probability and does not. Using it for
-10 mutually exclusive classes would be the wrong tool, and getting a number out
-of it would not mean I had understood either function. Reframing the same
-images as a single yes/no question is the honest way to exercise the pair.
-
-This run needs 60 epochs against the main run's 40, which is the `ŷ(1 - ŷ)`
-factor from section 2.5 doing exactly what the algebra predicts.
-
----
-
-## 5. Mistakes and how I found them (deliverable 1.6)
-
-### 5.1 Stale gradient references (caught by reasoning, before running)
+###  4.1 Stale gradient references (caught by reasoning, before running)
 
 `Linear.backward` originally did `self.dW = self._x.T @ d_out`. That **rebinds**
 `self.dW` to a fresh array. But `MLP.parameters()` hands out references to the
@@ -317,7 +227,7 @@ This is the mistake I am least comfortable about, because nothing in the test
 suite would have caught it. It came from thinking about object identity while
 writing `parameters()`, not from a failing test.
 
-### 5.2 The tanh check failing at 3.2e-10
+###  4.2 The tanh check failing at 3.2e-10
 
 First full harness run: 18/19 passed, tanh failed at 3.221e-10 against a 1e-10
 tolerance. The tempting move was to loosen the tolerance until it passed, which
@@ -334,9 +244,9 @@ difference into a 3e-10 relative output difference. The real fix was reporting
 absolute error alongside relative and passing on either, not moving the
 threshold.
 
-### 5.3 Which mistakes the harness would have caught
+###  4.3 Which mistakes the harness would have caught
 
-`test_harness_sensitivity.py` exists because of the near-miss in section 5.1. It
+`test_harness_sensitivity.py` exists because of the near-miss in section  4.1. It
 reintroduces the classic errors deliberately and confirms each is detected. The
 two I would most likely have made without a check:
 
@@ -352,7 +262,7 @@ Shape checking caught the missing transpose in `dx` for free: `dz @ W` cannot
 even execute. Making shape-vs-gradient-shape an explicit assertion turned that
 from a crash into a named failing check.
 
-### 5.4 Numerical stability, fixed pre-emptively rather than after a NaN
+###  4.4 Numerical stability, fixed pre-emptively rather than after a NaN
 
 Two places were written defensively from the start because the failure mode is
 a silent `NaN` rather than a wrong number:
